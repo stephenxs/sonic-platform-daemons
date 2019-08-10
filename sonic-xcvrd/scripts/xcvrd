@@ -51,6 +51,9 @@ SELECT_TIMEOUT_MSECS = 1000
 DOM_INFO_UPDATE_PERIOD_SECS = 60
 TIME_FOR_SFP_READY_SECS = 1
 
+TIME_FOR_SFPUTIL_READY_SECS = 5
+RETRY_FOR_SFPUTIL_READY = 30
+
 SFP_STATUS_INSERTED = '1'
 SFP_STATUS_REMOVED = '0'
 
@@ -348,6 +351,9 @@ class dom_info_update_task:
 def main():
     log_info("Starting up...")
 
+    xcvrd_has_started = False
+    wait_for_spfutil_retry = 0
+
     # Register our signal handlers
     signal.signal(signal.SIGHUP, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
@@ -414,10 +420,13 @@ def main():
     while True:
         status, port_dict = platform_sfputil.get_transceiver_change_event()
         if status:
+            if not xcvrd_has_started:
+                xcvrd_has_started = True
             for key, value in port_dict.iteritems():
                 logical_port_list = platform_sfputil.get_physical_to_logical(int(key))
                 for logical_port in logical_port_list:
                     if value == SFP_STATUS_INSERTED:
+                        log_info("Sfp module {} inserted".format(logical_port))
                         rc = post_port_sfp_info_to_db(logical_port, int_tbl)
                         # If we didn't get the sfp info, assuming the eeprom is not ready, give a try again.
                         if rc == SFP_EEPROM_NOT_READY:
@@ -426,14 +435,23 @@ def main():
                         post_port_dom_info_to_db(logical_port, dom_tbl)
 
                     elif value == SFP_STATUS_REMOVED:
+                        log_info("Sfp module {} removed".format(logical_port))
                         del_port_sfp_dom_info_to_db(logical_port, int_tbl, dom_tbl)
                     else:
                         # TODO, SFP return error code, need handle accordingly.
                         continue
         else:
-            # If get_transceiver_change_event() return error, will clean up the DB and then exit
+            # If get_transceiver_change_event() return error, retry for 30*5 seconds first.
+            # If it still return error, will clean up the DB and then exit
             # TODO: next step need to define more error types to handle accordingly.
-            break
+            if not xcvrd_has_started and wait_for_spfutil_retry < RETRY_FOR_SFPUTIL_READY:
+                time.sleep(TIME_FOR_SFP_READY_SECS)
+                wait_for_spfutil_retry = wait_for_spfutil_retry + 1
+                log_info("Sfputil is not ready after waiting {} seconds, waiting for another {} seconds"
+                    .format(TIME_FOR_SFPUTIL_READY_SECS * wait_for_spfutil_retry, TIME_FOR_SFPUTIL_READY_SECS))
+            else:
+                log_error("Sfputil isn't ready after waiting {} seconds, exiting...", format(TIME_FOR_SFPUTIL_READY_SECS * RETRY_FOR_SFPUTIL_READY))
+                break
 
     # Stop the dom info update timer
     dom_info_update.task_stop()
