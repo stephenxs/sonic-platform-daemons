@@ -722,7 +722,7 @@ class ThermalMonitor(ProcessTaskBase):
 
         self.chassis = chassis
 
-    def init_tables(self):
+    def init_updaters(self):
         self.fan_updater = FanUpdater(self.chassis, self.task_stopping_event)
         self.temperature_updater = TemperatureUpdater(self.chassis, self.task_stopping_event)
 
@@ -745,7 +745,7 @@ class ThermalMonitor(ProcessTaskBase):
         Thread function to handle Fan status update and temperature status update
         :return:
         """
-        self.init_tables()
+        self.init_updaters()
         self.logger.log_info("Start thermal monitoring loop")
 
         # Start loop to update fan, temperature info in DB periodically
@@ -755,24 +755,6 @@ class ThermalMonitor(ProcessTaskBase):
         self.temperature_updater.deinit()
 
         self.logger.log_info("Stop thermal monitoring loop")
-
-    def signal_handler(self, sig, frame):
-        """
-        Signal handler
-        :param sig: Signal number
-        :param frame: not used
-        :return:
-        """
-        FATAL_SIGNALS = [signal.SIGINT, signal.SIGTERM]
-        NONFATAL_SIGNALS = [signal.SIGHUP]
-
-        if sig in FATAL_SIGNALS:
-            self.log_info("Thermal monitor Caught signal '{}' - exiting...".format(SIGNALS_TO_NAMES_DICT[sig]))
-            self.task_stopping_event.set()
-        elif sig in NONFATAL_SIGNALS:
-            self.log_info("Caught signal '{}' - ignoring...".format(SIGNALS_TO_NAMES_DICT[sig]))
-        else:
-            self.log_warning("Caught unhandled signal '{}' - ignoring...".format(SIGNALS_TO_NAMES_DICT[sig]))
 
 #
 # Daemon =======================================================================
@@ -802,7 +784,7 @@ class ThermalControlDaemon(daemon_base.DaemonBase):
 
         self.thermal_monitor = ThermalMonitor(self.chassis)
         self.thermal_monitor.task_run()
-        self.thermal_monitor.init_tables()
+        self.thermal_monitor.init_updaters()
 
         self.thermal_manager = None
         try:
